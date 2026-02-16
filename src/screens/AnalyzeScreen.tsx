@@ -1,12 +1,14 @@
-import React, { useMemo, useState } from "react";
-import { View, Text, StyleSheet, TextInput, ScrollView } from "react-native";
+import React, { useEffect, useMemo, useState } from "react";
+import { Alert, ScrollView, Text, TextInput, TouchableOpacity, StyleSheet, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import GlassCard from "../components/GlassCard";
 import PrimaryButton from "../components/PrimaryButton";
 import RiskGauge from "../components/RiskGauge";
 import { postJSON } from "../lib/api";
+import { getClipboardText, getClipboardUrl } from "../lib/clipboard";
+import { useRoute } from "@react-navigation/native";
 
-type Mode = "sms" | "email" | "url";
+type AnalyzeMode = "email" | "sms" | "url";
 
 type AnalyzeResponse = {
   type: string;
@@ -29,18 +31,36 @@ type AnalyzeResponse = {
 const sampleSMS =
   "M-PESA: Your account will be locked. Verify now at http://example-login-secure.com/verify to avoid suspension.";
 const sampleEmail =
-  "Subject: Account Verification Required\nFrom: Support <support@secure-mail.example>\n\nDear customer, your account will be suspended within 24 hours. Verify now: http://bit.ly/abc";
+  "Subject: Account Verification Required\\nFrom: Support <support@secure-mail.example>\\n\\nDear customer, your account will be suspended within 24 hours. Verify now: http://bit.ly/abc";
 const sampleURL = "http://paypal.com.verify-user.security-update.xyz/login";
 
+type RouteParams = {
+  prefillMode?: AnalyzeMode;
+  prefillText?: string;
+  prefillEmailBody?: string;
+  prefillUrl?: string;
+  autoAnalyze?: boolean;
+};
+
 export default function AnalyzeScreen() {
-  const [mode, setMode] = useState<Mode>("sms");
+  const route = useRoute();
+  const params = (route.params || {}) as RouteParams;
+
+  const [mode, setMode] = useState<AnalyzeMode>(params.prefillMode || "sms");
+  const [smsText, setSmsText] = useState(params.prefillText || sampleSMS);
+  const [emailBody, setEmailBody] = useState(params.prefillEmailBody || sampleEmail);
+  const [url, setUrl] = useState(params.prefillUrl || sampleURL);
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<AnalyzeResponse | null>(null);
 
-  const [smsText, setSmsText] = useState(sampleSMS);
-  const [emailBody, setEmailBody] = useState(sampleEmail);
-  const [url, setUrl] = useState(sampleURL);
+  useEffect(() => {
+    if (params.prefillMode) setMode(params.prefillMode);
+    if (params.prefillText) setSmsText(params.prefillText);
+    if (params.prefillEmailBody) setEmailBody(params.prefillEmailBody);
+    if (params.prefillUrl) setUrl(params.prefillUrl);
+  }, [params.prefillMode, params.prefillText, params.prefillEmailBody, params.prefillUrl]);
 
   const endpoint = useMemo(() => {
     if (mode === "email") return "/api/v1/analyze-email";
@@ -53,10 +73,8 @@ export default function AnalyzeScreen() {
     setLoading(true);
     setResult(null);
     try {
-      let payload: any = {};
-      if (mode === "sms") payload = { text: smsText };
-      if (mode === "email") payload = { body: emailBody };
-      if (mode === "url") payload = { url };
+      const payload =
+        mode === "sms" ? { text: smsText } : mode === "email" ? { body: emailBody } : { url };
       const res = await postJSON<AnalyzeResponse>(endpoint, payload);
       setResult(res);
     } catch (e: any) {
@@ -66,111 +84,140 @@ export default function AnalyzeScreen() {
     }
   }
 
+  // Optional auto-run when arriving from Share Intent
+  useEffect(() => {
+    if (!params.autoAnalyze) return;
+    const t = setTimeout(() => analyze(), 150);
+    return () => clearTimeout(t);
+  }, [params.autoAnalyze]);
+
+  async function pasteFromClipboard() {
+    try {
+      const clipUrl = await getClipboardUrl();
+      const clipText = await getClipboardText();
+
+      if (clipUrl) {
+        setMode("url");
+        setUrl(clipUrl);
+        Alert.alert("Clipboard detected", "Found a URL in your clipboard.");
+        return;
+      }
+
+      if (clipText) {
+        setMode("sms");
+        setSmsText(clipText);
+        Alert.alert("Clipboard pasted", "Pasted clipboard text into SMS analyzer.");
+        return;
+      }
+
+      Alert.alert("Clipboard empty", "No text found in your clipboard.");
+    } catch {
+      Alert.alert("Clipboard error", "Could not read clipboard.");
+    }
+  }
+
   return (
     <LinearGradient colors={["#070A12", "#0B1020", "#0E2B3A"]} style={{ flex: 1 }}>
       <ScrollView contentContainerStyle={styles.container}>
-        <View style={styles.header}>
-          <Text style={styles.h1}>Analyze suspicious content</Text>
-          <Text style={styles.h2}>Email, SMS (M-Pesa scams), or URLs — get an actionable risk score.</Text>
-        </View>
+        <Text style={styles.h1}>Analyze</Text>
+        <Text style={styles.h2}>
+          Paste text/links, or share SMS/email content to AI ScamShield. We compute a risk score + recommendations.
+        </Text>
 
-        <View style={styles.tabs}>
-          <Text onPress={() => setMode("email")} style={[styles.tab, mode === "email" && styles.tabActive]}>Email</Text>
-          <Text onPress={() => setMode("sms")} style={[styles.tab, mode === "sms" && styles.tabActive]}>SMS</Text>
-          <Text onPress={() => setMode("url")} style={[styles.tab, mode === "url" && styles.tabActive]}>URL</Text>
-        </View>
-
-        <GlassCard title="Input" subtitle="Paste content below. The system runs ML + cyber rules + intel.">
-          {mode === "sms" ? (
-            <TextInput
-              value={smsText}
-              onChangeText={setSmsText}
-              placeholder="Paste SMS here..."
-              placeholderTextColor="rgba(231,236,255,0.45)"
-              multiline
-              style={[styles.input, { height: 140 }]}
-            />
-          ) : null}
-          {mode === "email" ? (
-            <TextInput
-              value={emailBody}
-              onChangeText={setEmailBody}
-              placeholder="Paste email text here..."
-              placeholderTextColor="rgba(231,236,255,0.45)"
-              multiline
-              style={[styles.input, { height: 140 }]}
-            />
-          ) : null}
-          {mode === "url" ? (
-            <TextInput
-              value={url}
-              onChangeText={setUrl}
-              placeholder="Paste URL here..."
-              placeholderTextColor="rgba(231,236,255,0.45)"
-              style={[styles.input]}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-          ) : null}
-
-          {error ? <Text style={styles.error}>{error}</Text> : null}
-
-          <View style={{ marginTop: 12 }}>
-            <PrimaryButton label="Analyze" onPress={analyze} loading={loading} />
+        <GlassCard title="Mode" subtitle="Select what you want to analyze.">
+          <View style={styles.modeRow}>
+            <ModePill label="Email" active={mode === "email"} onPress={() => setMode("email")} />
+            <ModePill label="SMS" active={mode === "sms"} onPress={() => setMode("sms")} />
+            <ModePill label="URL" active={mode === "url"} onPress={() => setMode("url")} />
           </View>
         </GlassCard>
 
-        <View style={{ height: 14 }} />
+        <View style={{ height: 12 }} />
+
+        <GlassCard title="Input" subtitle="Paste suspicious content below.">
+          {mode === "sms" && (
+            <TextInput
+              style={styles.input}
+              multiline
+              value={smsText}
+              onChangeText={setSmsText}
+              placeholder="Paste SMS…"
+              placeholderTextColor="rgba(231,236,255,0.35)"
+            />
+          )}
+          {mode === "email" && (
+            <TextInput
+              style={styles.input}
+              multiline
+              value={emailBody}
+              onChangeText={setEmailBody}
+              placeholder="Paste email…"
+              placeholderTextColor="rgba(231,236,255,0.35)"
+            />
+          )}
+          {mode === "url" && (
+            <TextInput
+              style={styles.input}
+              value={url}
+              onChangeText={setUrl}
+              autoCapitalize="none"
+              placeholder="Paste URL…"
+              placeholderTextColor="rgba(231,236,255,0.35)"
+            />
+          )}
+
+          {error ? <Text style={styles.err}>{error}</Text> : null}
+
+          <View style={{ height: 10 }} />
+
+          <View style={{ flexDirection: "row", gap: 10 }}>
+            <View style={{ flex: 1 }}>
+              <PrimaryButton label={loading ? "Analyzing…" : "Analyze"} onPress={analyze} disabled={loading} />
+            </View>
+            <TouchableOpacity onPress={pasteFromClipboard} style={styles.secondaryBtn} disabled={loading}>
+              <Text style={styles.secondaryBtnText}>Paste</Text>
+            </TouchableOpacity>
+          </View>
+        </GlassCard>
+
+        <View style={{ height: 12 }} />
 
         <GlassCard title="Result" subtitle={result ? `Analysis ID: ${result.analysis_id}` : "Run an analysis to see results."}>
-          {!result ? (
-            <Text style={styles.hint}>No result yet. Paste content and tap Analyze.</Text>
-          ) : (
-            <>
+          {result ? (
+            <View style={{ gap: 12 }}>
               <RiskGauge score={result.risk_score} level={result.risk_level} />
 
-              <View style={styles.row2}>
-                <View style={styles.mini}>
-                  <Text style={styles.miniLabel}>ML Probability</Text>
-                  <Text style={styles.miniVal}>{(result.ml.prob_phish * 100).toFixed(1)}%</Text>
-                  <Text style={styles.miniSub}>Confidence: {(result.ml.confidence * 100).toFixed(1)}%</Text>
-                </View>
-                <View style={styles.mini}>
-                  <Text style={styles.miniLabel}>Link intelligence</Text>
-                  <Text style={styles.miniSub}>Shortener: <Text style={styles.bold}>{String(result.intel.shortener)}</Text></Text>
-                  <Text style={styles.miniSub}>Reputation hit: <Text style={styles.bold}>{String(result.intel.reputation_hit)}</Text></Text>
-                  <Text style={styles.miniSub}>Domain age: <Text style={styles.bold}>
-                    {result.intel.domain_age_days === null || result.intel.domain_age_days === undefined ? "Unknown" : `${result.intel.domain_age_days} days`}
-                  </Text></Text>
-                </View>
-              </View>
+              <Text style={styles.kv}>
+                ML Probability: {(result.ml.prob_phish * 100).toFixed(1)}% • Confidence: {(result.ml.confidence * 100).toFixed(1)}% (model {result.ml.model_version})
+              </Text>
 
-              <View style={{ height: 10 }} />
+              <Text style={styles.section}>Why flagged</Text>
+              {result.reasons.map((r, idx) => (
+                <Text key={idx} style={styles.bullet}>
+                  • {r}
+                </Text>
+              ))}
 
-              <View style={styles.row2}>
-                <View style={styles.mini}>
-                  <Text style={styles.miniTitle}>Why it was flagged</Text>
-                  {result.reasons.map((r, i) => (
-                    <Text key={i} style={styles.bullet}>• {r}</Text>
-                  ))}
-                </View>
-                <View style={styles.mini}>
-                  <Text style={styles.miniTitle}>Recommended actions</Text>
-                  {result.recommended_actions.map((a, i) => (
-                    <Text key={i} style={styles.bullet}>• {a}</Text>
-                  ))}
-                </View>
-              </View>
+              <Text style={styles.section}>Recommended actions</Text>
+              {result.recommended_actions.map((a, idx) => (
+                <Text key={idx} style={styles.bullet}>
+                  • {a}
+                </Text>
+              ))}
 
               {result.intel.urls_found?.length ? (
-                <View style={{ marginTop: 10 }}>
-                  <Text style={styles.miniTitle}>URLs found</Text>
-                  {result.intel.urls_found.map((u, i) => (
-                    <Text key={i} style={styles.urlItem}>{u}</Text>
+                <>
+                  <Text style={styles.section}>URLs found</Text>
+                  {result.intel.urls_found.map((u, idx) => (
+                    <Text key={idx} style={styles.urlItem}>
+                      {u}
+                    </Text>
                   ))}
-                </View>
+                </>
               ) : null}
-            </>
+            </View>
+          ) : (
+            <Text style={styles.kv}>No result yet.</Text>
           )}
         </GlassCard>
       </ScrollView>
@@ -178,70 +225,53 @@ export default function AnalyzeScreen() {
   );
 }
 
+function ModePill({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
+  return (
+    <TouchableOpacity onPress={onPress} style={[styles.pill, active && styles.pillActive]}>
+      <Text style={[styles.pillText, active && styles.pillTextActive]}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { padding: 16, paddingBottom: 28 },
-  header: { marginBottom: 12 },
   h1: { color: "#E7ECFF", fontSize: 22, fontWeight: "800" },
-  h2: { color: "rgba(231,236,255,0.7)", marginTop: 6, fontSize: 13, lineHeight: 18 },
-  tabs: { flexDirection: "row", gap: 10, marginBottom: 12 },
-  tab: {
-    color: "rgba(231,236,255,0.72)",
-    paddingVertical: 8,
+  h2: { color: "rgba(231,236,255,0.7)", marginTop: 6, fontSize: 13, lineHeight: 18, marginBottom: 12 },
+  modeRow: { flexDirection: "row", gap: 10 },
+  pill: {
+    paddingVertical: 10,
     paddingHorizontal: 12,
     borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.06)",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.10)",
-    backgroundColor: "rgba(255,255,255,0.04)",
-    overflow: "hidden",
-    fontWeight: "700",
   },
-  tabActive: {
-    color: "#07121A",
-    borderColor: "rgba(167,139,250,0.55)",
-    backgroundColor: "rgba(167,139,250,0.95)",
-  },
+  pillActive: { backgroundColor: "rgba(59,130,246,0.25)", borderColor: "rgba(59,130,246,0.55)" },
+  pillText: { color: "rgba(231,236,255,0.8)", fontWeight: "700", fontSize: 13 },
+  pillTextActive: { color: "#E7ECFF" },
   input: {
-    marginTop: 6,
-    borderRadius: 14,
+    marginTop: 10,
+    borderRadius: 12,
+    padding: 12,
+    minHeight: 96,
+    color: "#E7ECFF",
+    backgroundColor: "rgba(7,10,18,0.55)",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.10)",
-    backgroundColor: "rgba(0,0,0,0.22)",
-    padding: 12,
-    color: "#E7ECFF",
   },
-  error: {
-    marginTop: 10,
-    color: "#FDA4AF",
-    backgroundColor: "rgba(244,63,94,0.15)",
-    borderColor: "rgba(244,63,94,0.25)",
-    borderWidth: 1,
-    padding: 10,
-    borderRadius: 12,
-  },
-  hint: { color: "rgba(231,236,255,0.75)" },
-  row2: { flexDirection: "row", gap: 10, marginTop: 8 },
-  mini: {
-    flex: 1,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
-    backgroundColor: "rgba(0,0,0,0.18)",
-    padding: 12,
-  },
-  miniLabel: { color: "rgba(231,236,255,0.65)", fontSize: 12 },
-  miniVal: { color: "#E7ECFF", fontSize: 18, fontWeight: "800", marginTop: 4 },
-  miniSub: { color: "rgba(231,236,255,0.7)", fontSize: 12, marginTop: 4 },
-  miniTitle: { color: "#E7ECFF", fontSize: 13, fontWeight: "800", marginBottom: 6 },
-  bullet: { color: "rgba(231,236,255,0.78)", fontSize: 12, marginTop: 4, lineHeight: 16 },
-  bold: { color: "#E7ECFF", fontWeight: "800" },
-  urlItem: {
-    color: "#A78BFA",
-    fontSize: 12,
-    marginTop: 6,
-    padding: 10,
+  err: { marginTop: 10, color: "#FB7185", fontWeight: "700" },
+  kv: { color: "rgba(231,236,255,0.78)", lineHeight: 18 },
+  section: { marginTop: 10, color: "#E7ECFF", fontWeight: "800" },
+  bullet: { color: "rgba(231,236,255,0.78)", marginTop: 6, lineHeight: 18 },
+  urlItem: { color: "#93C5FD", marginTop: 6, fontSize: 12 },
+  secondaryBtn: {
+    alignSelf: "stretch",
+    justifyContent: "center",
+    paddingHorizontal: 14,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "rgba(167,139,250,0.25)",
-    backgroundColor: "rgba(167,139,250,0.08)",
+    borderColor: "rgba(255,255,255,0.14)",
+    backgroundColor: "rgba(255,255,255,0.06)",
   },
+  secondaryBtnText: { color: "rgba(231,236,255,0.88)", fontWeight: "800" },
 });

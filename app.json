@@ -2,7 +2,7 @@
   "expo": {
     "name": "AI ScamShield",
     "slug": "ai-scamshield-mobile",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -11,10 +11,12 @@
       "resizeMode": "contain",
       "backgroundColor": "#070A12"
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "android": {
       "package": "com.jtecsolutions.scamshield",
-      "versionCode": 2,
+      "versionCode": 3,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#070A12"
@@ -25,6 +27,21 @@
         "projectId": "438f050e-6176-485d-b421-0a5d0125b529"
       }
     },
-    "plugins": ["expo-asset"]
+    "plugins": [
+      "expo-asset",
+      [
+        "expo-share-intent",
+        {
+          "disableIOS": true,
+          "androidIntentFilters": [
+            "text/*"
+          ],
+          "androidMainActivityAttributes": {
+            "android:launchMode": "singleTask"
+          }
+        }
+      ]
+    ],
+    "scheme": "scamshield"
   }
 }
