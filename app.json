@@ -20,6 +20,14 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#070A12"
       }
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "438f050e-6176-485d-b421-0a5d0125b529"
+      }
+    },
+    "plugins": [
+      "expo-asset"
+    ]
   }
 }
